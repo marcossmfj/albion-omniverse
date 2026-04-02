@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import time
 import math
+import concurrent.futures
 
 # ==========================================
 # 1. CONFIGURAÇÕES - DARK MODE TERMINAL ELITE
@@ -18,42 +19,50 @@ st.markdown("""
 <style>
 .main { background-color: #0d1117; color: #c9d1d9; font-family: 'Inter', sans-serif; }
 [data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
-h1, h2, h3, h5 { color: #58a6ff !important; font-weight: 800; }
+h1, h2, h3, h5 { color: #58a6ff !important; font-weight: 800; margin-bottom: -10px; }
 .stCaption { color: #8b949e !important; }
+
 .stButton>button {
     background-color: #1f6feb !important; color: white !important;
     border: none !important; border-radius: 6px !important;
     font-weight: bold !important; transition: all 0.2s ease;
-    box-shadow: 0 4px 10px rgba(31, 111, 235, 0.3) !important;
-    width: 100% !important; height: 50px !important; font-size: 1.1rem !important;
+    box-shadow: 0 4px 10px rgba(31, 111, 235, 0.2) !important;
+    height: 42px !important; font-size: 1rem !important; margin-top: 27px;
 }
-.stButton>button:hover { background-color: #15469a !important; transform: translateY(-2px); box-shadow: 0 6px 15px rgba(31, 111, 235, 0.4) !important; }
-[data-testid="stSidebar"] .stButton>button { height: 35px !important; font-size: 0.9rem !important; margin-top: 15px; }
+.stButton>button:hover { background-color: #15469a !important; transform: translateY(-2px); }
+
+[data-testid="stSidebar"] div.stRadio label{
+    background-color: transparent; padding: 8px 12px;
+    border-radius: 6px; color: #c9d1d9; font-weight: 600;
+    cursor: pointer; transition: 0.2s;
+}
+[data-testid="stSidebar"] div.stRadio label:hover { background-color: #30363d; }
+[data-testid="stSidebar"] div.stRadio label[data-selected="true"] {
+    background-color: #1f6feb; color: white;
+}
+
 div[data-testid="metric-container"] {
     background-color: #161b22; border: 1px solid #30363d;
-    padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+    padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
-[data-testid="stMetricLabel"] { color: #8b949e; font-size: 0.9rem; font-weight: 500; }
-[data-testid="stMetricValue"] { color: #00FF41 !important; font-weight: 900; font-size: 2.2rem; }
-div.stDataFrame { border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background-color: #0d1117; }
+[data-testid="stMetricValue"] { color: #00FF41 !important; font-weight: 900; font-size: 1.8rem; }
+div.stDataFrame { border: 1px solid #30363d; border-radius: 8px; background-color: #0d1117; }
 </style>
 """, unsafe_allow_html=True)
 
-TAXA_MERCADO = 0.08
 CIDADES_ROYAL = ["Martlock", "Caerleon", "Thetford", "Fort Sterling", "Lymhurst", "Bridgewatch", "Brecilien"]
 CIDADES_DESTINO = CIDADES_ROYAL + ["Black Market"]
 MAPA_SERVIDORES = { "Américas (West)": "west", "Europa (Europe)": "europe", "Ásia (East)": "east" }
 
-# Dicionários de Regras Reais de Refino (Albion Online Oficial)
 REGRAS_QTD_BRUTO = {4: 2, 5: 3, 6: 4, 7: 5, 8: 5}
 ITEM_VALUE_BASE = {4: 16, 5: 32, 6: 64, 7: 128, 8: 256}
 
 MAPA_REFINO = {
-    "Minério (Metal)": {"bruto": "ORE", "refinado": "METALBAR", "base_t3": "T3_METALBAR", "bonus": "Thetford"},
-    "Madeira (Tábua)": {"bruto": "WOOD", "refinado": "PLANKS", "base_t3": "T3_PLANKS", "bonus": "Fort Sterling"},
-    "Pelego (Couro)": {"bruto": "HIDE", "refinado": "LEATHER", "base_t3": "T3_LEATHER", "bonus": "Martlock"},
-    "Fibra (Tecido)": {"bruto": "FIBER", "refinado": "CLOTH", "base_t3": "T3_CLOTH", "bonus": "Lymhurst"},
-    "Pedra (Bloco)": {"bruto": "ROCK", "refinado": "STONEBLOCK", "base_t3": "T3_STONEBLOCK", "bonus": "Bridgewatch"}
+    "Minério (Metal)": {"bruto": "ORE", "refinado": "METALBAR", "base_t3": "T3_METALBAR", "bonus": "Thetford", "journal": "JOURNAL_ORE"},
+    "Madeira (Tábua)": {"bruto": "WOOD", "refinado": "PLANKS", "base_t3": "T3_PLANKS", "bonus": "Fort Sterling", "journal": "JOURNAL_WOOD"},
+    "Pelego (Couro)": {"bruto": "HIDE", "refinado": "LEATHER", "base_t3": "T3_LEATHER", "bonus": "Martlock", "journal": "JOURNAL_HIDE"},
+    "Fibra (Tecido)": {"bruto": "FIBER", "refinado": "CLOTH", "base_t3": "T3_CLOTH", "bonus": "Lymhurst", "journal": "JOURNAL_FIBER"},
+    "Pedra (Bloco)": {"bruto": "ROCK", "refinado": "STONEBLOCK", "base_t3": "T3_STONEBLOCK", "bonus": "Bridgewatch", "journal": "JOURNAL_STONE"}
 }
 
 # ==========================================
@@ -76,15 +85,6 @@ def calcular_peso_item(item_id):
     if any(x in item_id for x in ["WOOD", "ROCK", "ORE", "HIDE", "FIBER", "PLANKS", "METALBAR", "LEATHER", "CLOTH"]):
         return tier * 0.5
     return tier * 1.2
-
-def rendering_sidebar_header():
-    fogo_svg = '<svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:#ff9a00;margin-right:8px;"><path d="M11.9,1.1c-0.2-0.2-0.6-0.2-0.8,0l-0.8,0.8C6.9,5.2,5.2,8,5.2,11.3c0,3.7,3,6.7,6.7,6.7s6.7-3,6.7-6.7c0-3.3-1.7-6.1-4.1-9.4L11.9,1.1z M12,16.2c-2.7,0-4.9-2.2-4.9-4.9c0-1.2,0.4-2.2,1-3c1.1-1.4,2.8-2.3,4.7-2.3c0.1,0,0.2,0,0.3,0v0c1.7,0.1,3.2,1.1,4.1,2.5c0.6,0.9,0.9,1.9,0.9,3.1C16.9,14,14.7,16.2,12,16.2z"></path></svg>'
-    st.sidebar.markdown(f"""
-        <div style="display:flex; align-items:center; margin-bottom:15px; border-bottom:1px solid #30363d; padding-bottom:15px;">
-            {fogo_svg}
-            <span style="font-weight:900; font-size:1.5rem; color:white;">Omniverse <span style="color:#58a6ff">GOD MODE</span></span>
-        </div>
-        """, unsafe_allow_html=True)
 
 DICIONARIO_PTBR = {
     "MOUNT_COUGAR_KEEPER":"Garra-ligeira", "MOUNT_DIREWOLF":"Lobo-vil", "MOUNT_WILD_BOAR":"Javali Selado",
@@ -110,10 +110,8 @@ def gerar_matriz(lista, min_t=4, max_t=8, max_e=4):
             base = f"T{t}_{item}"
             res.append(base)
             for e in range(1, max_e + 1):
-                if item in recursos:
-                    res.append(f"{base}_LEVEL{e}@{e}")
-                else:
-                    res.append(f"{base}@{e}")
+                if item in recursos: res.append(f"{base}_LEVEL{e}@{e}")
+                else: res.append(f"{base}@{e}")
     return res
 
 CATEGORIAS = {
@@ -127,46 +125,87 @@ CATEGORIAS = {
 TODOS_ITENS = sum(CATEGORIAS.values(), [])
 
 # ==========================================
-# 3. MOTORES DE BUSCA DA API (TCP POOLING)
+# 3. SIDEBAR (SETUP GLOBAL E MENU)
 # ==========================================
-@st.cache_data(ttl=120, show_spinner=False)
-def motor_de_busca_transporte(itens, servidor, origem_lista, destinos, cap_montaria):
-    chunks = [itens[i:i+100] for i in range(0, len(itens), 100)]
-    dados_p, dados_v = [], []
-    session = requests.Session()
-    barra = st.progress(0, text="⚡ Analisando Histórico e Pesos (Wall Street Mode)...")
-    destinos_str = ",".join(destinos)
-    origens_str = ",".join(origem_lista)
+# NOVA LOGO CLICÁVEL (Redireciona para o início do site limpando tudo)
+fogo_svg = '<svg viewBox="0 0 24 24" style="width:26px;height:26px;fill:#ff9a00;margin-right:8px;"><path d="M11.9,1.1c-0.2-0.2-0.6-0.2-0.8,0l-0.8,0.8C6.9,5.2,5.2,8,5.2,11.3c0,3.7,3,6.7,6.7,6.7s6.7-3,6.7-6.7c0-3.3-1.7-6.1-4.1-9.4L11.9,1.1z M12,16.2c-2.7,0-4.9-2.2-4.9-4.9c0-1.2,0.4-2.2,1-3c1.1-1.4,2.8-2.3,4.7-2.3c0.1,0,0.2,0,0.3,0v0c1.7,0.1,3.2,1.1,4.1,2.5c0.6,0.9,0.9,1.9,0.9,3.1C16.9,14,14.7,16.2,12,16.2z"></path></svg>'
+st.sidebar.markdown(f"""
+    <a href="." target="_self" style="text-decoration: none; color: inherit;">
+        <div style="display:flex; align-items:center; margin-bottom:15px; cursor: pointer;">
+            {fogo_svg}
+            <span style="font-weight:900; font-size:1.4rem; color:white;">Omniverse <span style="color:#58a6ff">PRO</span></span>
+        </div>
+    </a>
+    """, unsafe_allow_html=True)
 
-    for i, chunk in enumerate(chunks):
-        barra.progress((i+1)/len(chunks))
+# Nova aba "Início" adicionada
+selecao_app = st.sidebar.radio(
+    "Navegação",
+    ["🏠 Início", "👑 REI DO REFINO", "🌍 Radar Tático Global", "🎯 Black Market Sniper"],
+    label_visibility="collapsed"
+)
+
+st.sidebar.divider()
+st.sidebar.markdown("##### 🌐 Setup Global")
+servidor_ui = st.sidebar.selectbox("Servidor:", list(MAPA_SERVIDORES.keys()))
+servidor_api = MAPA_SERVIDORES[servidor_ui]
+
+opcoes_montaria = {"🎒 Unitário": 0, "🐂 Boi T5 (1200kg)": 1200, "🐗 Javali (900kg)": 900, "🦣 Mamute (25000kg)": 25000}
+montaria_ui = st.sidebar.selectbox("Sua Carga Total:", list(opcoes_montaria.keys()), index=0)
+cap_selecionada = opcoes_montaria[montaria_ui]
+
+st.sidebar.divider()
+st.sidebar.markdown("##### 💰 Taxas de Mercado")
+tem_premium = st.sidebar.toggle("✨ Conta Premium (Taxa 4%)", value=True, help="O Premium reduz a taxa de mercado pela metade.")
+taxa_mercado_atual = 0.04 if tem_premium else 0.08
+
+if st.sidebar.button("🔄 Limpar Cache", use_container_width=True):
+    st.cache_data.clear()
+
+# ==========================================
+# 4. MOTOR MULTI-THREADING (ALTA PERFORMANCE)
+# ==========================================
+def fetch_url(url):
+    try:
+        r = requests.get(url, timeout=10)
+        return r.json() if r.status_code == 200 else []
+    except: return []
+
+@st.cache_data(ttl=120, show_spinner=False)
+def motor_de_busca_transporte(itens, servidor, origem_lista, destinos, cap_montaria, taxa_aplicada):
+    chunks = [itens[i:i+100] for i in range(0, len(itens), 100)]
+    urls = []
+    for chunk in chunks:
         ids = ",".join(chunk)
-        try:
-            r1 = session.get(f"https://{servidor}.albion-online-data.com/api/v2/stats/prices/{ids}?locations={origens_str},{destinos_str}&qualities=1", timeout=8)
-            r2 = session.get(f"https://{servidor}.albion-online-data.com/api/v2/stats/history/{ids}?locations={destinos_str}&t=24", timeout=8)
-            if r1.status_code == 200: dados_p.extend(r1.json())
-            if r2.status_code == 200: dados_v.extend(r2.json())
-        except: pass
-        time.sleep(0.05)
+        urls.append(f"https://{servidor}.albion-online-data.com/api/v2/stats/prices/{ids}?locations={','.join(origem_lista)},{','.join(destinos)}&qualities=1")
+        urls.append(f"https://{servidor}.albion-online-data.com/api/v2/stats/history/{ids}?locations={','.join(destinos)}&t=24")
+    
+    barra = st.progress(0, text="⚡ Disparando Multi-Threads na API do Albion...")
+    
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        for i, res in enumerate(executor.map(fetch_url, urls)):
+            results.append(res)
+            barra.progress((i+1)/len(urls))
     barra.empty()
 
-    precos = {}
+    dados_p, dados_v = [], []
+    for i in range(0, len(results), 2):
+        if results[i]: dados_p.extend(results[i])
+        if (i+1) < len(results) and results[i+1]: dados_v.extend(results[i+1])
+
+    precos, hist_analise = {}, {}
     for e in dados_p:
         if (p := e["sell_price_min"] if e["sell_price_min"] > 0 else e["buy_price_max"]) > 0:
             precos.setdefault(e["item_id"], {})[e["city"]] = p
 
-    hist_analise = {}
     for h in dados_v:
         iid = h["item_id"]
         dados_reais = h.get("data", [])
         if dados_reais:
             vol_total = sum(d["item_count"] for d in dados_reais)
             precos_medios = [d["avg_price"] for d in dados_reais]
-            media_24h = sum(precos_medios) / len(precos_medios)
-            hist_analise.setdefault(iid, {"vol": 0, "curva": [], "media_24h": 0})
-            hist_analise[iid]["vol"] += vol_total
-            hist_analise[iid]["curva"].extend(precos_medios)
-            hist_analise[iid]["media_24h"] = media_24h
+            hist_analise[iid] = {"vol": vol_total, "curva": precos_medios, "media_24h": sum(precos_medios)/len(precos_medios)}
 
     resultados = []
     for item in itens:
@@ -179,17 +218,15 @@ def motor_de_busca_transporte(itens, servidor, origem_lista, destinos, cap_monta
             if compra > 0 and p_venda:
                 cid_venda = max(p_venda, key=p_venda.get)
                 venda = p_venda[cid_venda]
-                lucro = (venda * (1 - TAXA_MERCADO)) - compra
+                lucro = (venda * (1 - taxa_aplicada)) - compra
                 
                 if lucro > 0:
                     info_h = hist_analise.get(item, {"vol": 0, "curva": [venda, venda], "media_24h": venda})
                     vol, curva, media_hist = info_h["vol"], info_h["curva"], info_h["media_24h"]
-                    if not curva: curva = [venda, venda] 
                     
                     margem = (lucro/compra)*100
                     peso_kg = calcular_peso_item(item)
                     lucro_kg = lucro / peso_kg if peso_kg > 0 else lucro
-                    
                     nome, t, e = formatar_nome_item(item)
                     
                     if venda > (media_hist * 2.5) and media_hist > 0: score = "🚨 SCAM"
@@ -199,23 +236,19 @@ def motor_de_busca_transporte(itens, servidor, origem_lista, destinos, cap_monta
                         elif vol >= 5 and margem >= 5: score = "B 🟢"
                         else: score = "C 🟡"
                     
-                    lucro_viagem_text = "-"
-                    lucro_viagem_val = 0
+                    l_viagem_text, l_viagem_val = "-", 0
                     if cap_montaria > 0:
                         qtd_cabe = math.floor(cap_montaria / peso_kg)
-                        lucro_viagem_val = qtd_cabe * lucro
-                        lucro_viagem_text = formatar_prata(lucro_viagem_val)
+                        l_viagem_val = qtd_cabe * lucro
+                        l_viagem_text = formatar_prata(l_viagem_val)
 
                     resultados.append({
                         "Mercadoria": nome, "Tier": t, "Enc": e,
                         "Logística": f"{cid_compra}➔{cid_venda}{' ☠️' if cid_venda=='Black Market' else ''}",
-                        "Score": score, 
-                        "Compra_f": formatar_prata(compra), "Venda_f": formatar_prata(venda),
-                        "Lucro Líquido_f": formatar_prata(lucro), "Lucro_r": lucro,
-                        "Lucro/Kg_f": formatar_prata(lucro_kg),
-                        "Lucro Viagem": lucro_viagem_text, "Lucro_Viagem_r": lucro_viagem_val,
-                        "Margem (%)": margem, "Giro/24h": vol,
-                        "Gráfico 24h": curva 
+                        "Score": score, "Compra_f": formatar_prata(compra), "Venda_f": formatar_prata(venda),
+                        "Lucro Líquido_f": formatar_prata(lucro), "Lucro_r": lucro, "Lucro/Kg_f": formatar_prata(lucro_kg),
+                        "Lucro Viagem": l_viagem_text, "Lucro_Viagem_r": l_viagem_val,
+                        "Margem (%)": margem, "Giro/24h": vol, "Gráfico 24h": curva 
                     })
     return pd.DataFrame(resultados)
 
@@ -224,142 +257,141 @@ def motor_de_busca_refino(itens, servidor, cidades):
     session = requests.Session()
     ids = ",".join(itens)
     cids = ",".join(cidades)
+    barra = st.progress(0, text="⚡ Sincronizando Usinas na Nuvem...")
     try:
         url_p = f"https://{servidor}.albion-online-data.com/api/v2/stats/prices/{ids}?locations={cids}&qualities=1"
-        url_h = f"https://{servidor}.albion-online-data.com/api/v2/stats/history/{ids}?locations={cids}&t=24"
         r1 = session.get(url_p, timeout=10)
+        url_h = f"https://{servidor}.albion-online-data.com/api/v2/stats/history/{ids}?locations={cids}&t=24"
         r2 = session.get(url_h, timeout=10)
+        barra.empty()
         return r1.json() if r1.status_code==200 else [], r2.json() if r2.status_code==200 else []
-    except: return [], []
+    except: 
+        barra.empty()
+        return [], []
 
 # ==========================================
-# 4. RENDERIZADORES DE DASHBOARD
+# 5. RENDERIZADORES COMPACTOS DE TOPO E TABELA
 # ==========================================
-def renderizar_ultimate_dashboard(df):
+def rendering_top_tatico_filters():
+    with st.expander("⚙️ Filtros Avançados (Tier, Encantamento, Margem, SCAM)"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        fc1, fc2, fc3, fc4 = st.columns([1,1,1,1])
+        with fc1: f_tier = st.multiselect("Travar Tier", ["T3", "T4", "T5", "T6", "T7", "T8"], label_visibility="collapsed")
+        with fc2: f_enc = st.multiselect("Travar Enc", ["0", "1", "2", "3", "4"], label_visibility="collapsed")
+        with fc3: o_scam = st.checkbox("🛡️ Ocultar SCAMs", value=True)
+        with fc4: 
+            f_nome = st.text_input("Buscar Item", label_visibility="collapsed")
+            c_sl = st.columns(2)
+            with c_sl[0]: m_min = st.slider("Margem %", 0, 100, 1, label_visibility="collapsed")
+            with c_sl[1]: v_min = st.slider("Giro", 0, 50, 1, label_visibility="collapsed")
+    return f_tier, f_enc, o_scam, f_nome, m_min, v_min
+
+def renderizar_tabela_transporte(df, f_tier, f_enc, o_scam, f_nome, m_min, v_min):
     if not df.empty:
-        if busca_nome: df = df[df["Mercadoria"].str.contains(busca_nome, case=False)]
-        df = df[(df["Margem (%)"] >= margem_min) & (df["Giro/24h"] >= giro_min)]
-        if filtro_tier: df = df[df["Tier"].isin(filtro_tier)]
-        if filtro_enc: df = df[df["Enc"].isin(filtro_enc)]
-        if ocultar_scam: df = df[df["Score"] != "🚨 SCAM"]
+        if f_nome: df = df[df["Mercadoria"].str.contains(f_nome, case=False)]
+        df = df[(df["Margem (%)"] >= m_min) & (df["Giro/24h"] >= v_min)]
+        if f_tier: df = df[df["Tier"].isin(f_tier)]
+        if f_enc: df = df[df["Enc"].isin(f_enc)]
+        if o_scam: df = df[df["Score"] != "🚨 SCAM"]
         
         if not df.empty:
             ordem_col = "Lucro_Viagem_r" if cap_selecionada > 0 else "Lucro_r"
             df = df.sort_values(by=["Score", ordem_col], ascending=[True, False])
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("📌 Rotas Encontradas", f"{len(df)} itens")
-            c2.metric("🚀 Pico de Margem", f"{df['Margem (%)'].max():.1f}%")
-            if cap_selecionada > 0:
-                c3.metric("🦣 Maior Lucro/Viagem", formatar_prata(df['Lucro_Viagem_r'].max()))
-            else:
-                c3.metric("⚖️ Maior Lucro/Kg", formatar_prata(df['Lucro_r'].max() / 2)) 
+            c1.metric("📌 Oportunidades", f"{len(df)} itens")
+            c2.metric("🚀 Margem Máxima", f"{df['Margem (%)'].max():.1f}%")
+            if cap_selecionada > 0: c3.metric("🦣 Pico Lucro/Viagem", formatar_prata(df['Lucro_Viagem_r'].max()))
+            else: c3.metric("⚖️ Pico Lucro/Kg", formatar_prata(df['Lucro_r'].max() / 2)) 
             
             st.markdown("<br>", unsafe_allow_html=True)
-            
             col_config = {
-                "Mercadoria": st.column_config.TextColumn("Mercadoria", width="medium"),
-                "Score": st.column_config.TextColumn("Avaliação", width="small"),
+                "Mercadoria": st.column_config.TextColumn("Item", width="medium"),
+                "Score": st.column_config.TextColumn("Tier", width="small"),
                 "Gráfico 24h": st.column_config.LineChartColumn("📈 Tendência 24h", y_min=0, y_max=None),
                 "Margem (%)": st.column_config.NumberColumn("Margem %", format="%.1f%%"),
                 "Lucro/Kg_f": st.column_config.TextColumn("⚖️ Lucro/Kg"),
-                "Compra_f": st.column_config.TextColumn("📥 Compra"),
-                "Venda_f": st.column_config.TextColumn("📤 Venda"),
+                "Compra_f": st.column_config.TextColumn("📥 Compra Imediata"),
+                "Venda_f": st.column_config.TextColumn("📤 Venda (Sem Ordem)"),
                 "Lucro Líquido_f": st.column_config.TextColumn("💰 Lucro Un."),
             }
-            
             if cap_selecionada == 0: df = df.drop(columns=["Lucro Viagem"])
             else: col_config["Lucro Viagem"] = st.column_config.TextColumn("🦣 Carga Total")
 
-            st.dataframe(
-                df.drop(columns=['Lucro_r', 'Lucro_Viagem_r', 'Tier', 'Enc']), 
-                use_container_width=True, hide_index=True, column_config=col_config
-            )
+            st.dataframe(df.drop(columns=['Lucro_r', 'Lucro_Viagem_r', 'Tier', 'Enc']), use_container_width=True, hide_index=True, column_config=col_config)
         else: st.warning("⚠️ Nenhum item sobreviveu aos filtros.")
-    else: st.error("💀 O mercado está sem liquidez nestas rotas.")
+    else: st.error("💀 O mercado está sem liquidez.")
 
 # ==========================================
-# 5. UI - SIDEBAR DE CONTROLE TÁTICO
+# 6. CORPO PRINCIPAL
 # ==========================================
-rendering_sidebar_header()
-servidor_ui = st.sidebar.selectbox("Região Global", list(MAPA_SERVIDORES.keys()))
-servidor_api = MAPA_SERVIDORES[servidor_ui]
 
-origens = st.sidebar.multiselect("Comprar em:", CIDADES_ROYAL, default=["Martlock"])
-destino = st.sidebar.selectbox("Vender em:", CIDADES_DESTINO, index=1)
-
-st.sidebar.divider()
-st.sidebar.markdown("### 🦣 Simulador de Carga")
-opcoes_montaria = {"🎒 Apenas Unitário": 0, "🐂 Boi T5 (1200kg)": 1200, "🐗 Javali (900kg)": 900, "🦣 Mamute (25000kg)": 25000}
-montaria_ui = st.sidebar.selectbox("Qual sua montaria?", list(opcoes_montaria.keys()))
-cap_selecionada = opcoes_montaria[montaria_ui]
-
-st.sidebar.divider()
-st.sidebar.markdown("### 🏹 Defesas & Filtros")
-ocultar_scam = st.sidebar.checkbox("🛡️ Ocultar SCAMs (Manipulação)", value=True)
-busca_nome = st.sidebar.text_input("Buscar Item (ex: Sangra)")
-margem_min = st.sidebar.slider("Margem Mínima (%)", 0, 100, 1)
-giro_min = st.sidebar.slider("Vendas Mínimas (24h)", 0, 50, 1)
-
-filtro_tier = st.sidebar.multiselect("Travar Tier", ["T3", "T4", "T5", "T6", "T7", "T8"])
-filtro_enc = st.sidebar.multiselect("Travar Encantamento", ["0", "1", "2", "3", "4"])
-
-if st.sidebar.button("🔄 Resetar Cache", use_container_width=True):
-    st.cache_data.clear()
-
-# ==========================================
-# 6. CORPO PRINCIPAL - ABAS E RENDERIZAÇÃO
-# ==========================================
-st.title("💎 Terminal Omniverse GOD MODE")
-st.caption("A plataforma definitiva para Arbitragem de Transporte e Refino Industrial no Albion.")
-
-abas = st.tabs(["👑 REI DO REFINO (NOVO)", "🌍 Radar Tático Global"] + list(CATEGORIAS.keys()))
-
-# --- ABA 1: REI DO REFINO (MÓDULO INDUSTRIAL PRO) ---
-with abas[0]:
-    st.markdown("### 🏭 O Rei do Refino: Inteligência Industrial Avançada")
+# ------------------------------------------
+# MÓDULO 0: INÍCIO (DASHBOARD)
+# ------------------------------------------
+if selecao_app == "🏠 Início":
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.title("💎 Bem-vindo ao Omniverse PRO")
+    st.markdown("A plataforma de inteligência de mercado mais avançada e **100% gratuita** para Albion Online.")
+    st.divider()
     
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        recurso = st.selectbox("O que vamos refinar hoje?", list(MAPA_REFINO.keys()))
-        config = MAPA_REFINO[recurso]
-    with col_b:
-        taxa_uso = st.number_input("Taxa da Estação / Tax Fee (ex: 500)", value=500, help="Valor cobrado por 100 de nutrição na cidade.")
-    with col_c:
-        uso_foco = st.toggle("✨ Usar Foco de Produção", value=True)
-        rrr = 43.5 if uso_foco else 15.2
-        st.info(f"Taxa de Retorno (RRR): **{rrr}%**")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.info("**👑 Rei do Refino**\n\nCalcule rotas industriais com precisão absurda. Inclui custo oculto (Item Value), bônus de cidade, e lucro com venda de Diários de Trabalhador.")
+    with c2:
+        st.success("**🌍 Radar Tático**\n\nEncontre oportunidades de arbitragem entre cidades (comprar barato e vender caro) com proteção inteligente Anti-Scam e Gráficos de Tendência.")
+    with c3:
+        st.error("**🎯 BM Sniper**\n\nIdentifique flips instantâneos em Caerleon direto para o Black Market. Ative o 'Fast Flip' para lucrar sem sair da cidade.")
+        
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.caption("Use o menu lateral para navegar entre os módulos. Ajuste o servidor e a sua montaria na aba 'Setup Global' para cálculos logísticos exatos.")
 
-    if st.button(f"🚀 PROCESSAR ROTA INDUSTRIAL: {recurso.upper()}", use_container_width=True, type="primary"):
-        lista_ids = [config['base_t3']] # Precisa do T3 flat para fazer T4
+# ------------------------------------------
+# MÓDULO 1: REI DO REFINO
+# ------------------------------------------
+elif selecao_app == "👑 REI DO REFINO":
+    st.markdown(f"<h2>{selecao_app}</h2>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1.2])
+    with c1: recurso_nome = st.selectbox("Recurso (Matéria Prima)", list(MAPA_REFINO.keys()), label_visibility="collapsed")
+    with c2: taxa_estacao = st.number_input("Tax Fee da Loja", value=500, label_visibility="collapsed")
+    with c3: uso_foco = st.selectbox("Modo de Foco", ["✨ Sem Foco (15.2%)", "🔥 Com Foco (43.5%)"], label_visibility="collapsed")
+    with c4: btn_refino = st.button("🚀 CALCULAR REFINO", use_container_width=True)
+
+    if btn_refino:
+        config = MAPA_REFINO[recurso_nome]
+        rrr = 43.5 if "Com Foco" in uso_foco else 15.2
+        
+        lista_ids = [config['base_t3']]
         for t in range(4, 9):
-            lista_ids.append(f"T{t}_{config['bruto']}")
-            lista_ids.append(f"T{t}_{config['refinado']}") 
+            lista_ids.extend([f"T{t}_{config['bruto']}", f"T{t}_{config['refinado']}"])
+            lista_ids.extend([f"T{t}_{config['journal']}_EMPTY", f"T{t}_{config['journal']}_FULL"])
             for e in range(1, 5):
                 sufix = f"_LEVEL{e}@{e}"
-                lista_ids.append(f"T{t}_{config['bruto']}{sufix}")
-                lista_ids.append(f"T{t}_{config['refinado']}{sufix}")
+                lista_ids.extend([f"T{t}_{config['bruto']}{sufix}", f"T{t}_{config['refinado']}{sufix}"])
 
         precos_raw, hist_raw = motor_de_busca_refino(lista_ids, servidor_api, CIDADES_ROYAL)
         
-        precos = {}
-        for p in precos_raw:
-            val = p['sell_price_min'] if p['sell_price_min'] > 0 else p['buy_price_max']
-            if val > 0: precos.setdefault(p['item_id'], {})[p['city']] = val
-            
+        precos = {p['item_id']: {p['city']: p['sell_price_min'] if p['sell_price_min']>0 else p['buy_price_max']} for p in precos_raw if (p['sell_price_min']>0 or p['buy_price_max']>0)}
         vendas_24h = {h['item_id']: sum(d['item_count'] for d in h.get('data', [])) for h in hist_raw}
 
         refino_data = []
         for t in range(4, 9):
+            lucro_diario_txt = "-"
+            if t >= 5:
+                id_vazio, id_cheio = f"T{t}_{config['journal']}_EMPTY", f"T{t}_{config['journal']}_FULL"
+                if id_vazio in precos and id_cheio in precos:
+                    p_vazio = min(precos[id_vazio].values())
+                    p_cheio = max(precos[id_cheio].values())
+                    ld = p_cheio - p_vazio
+                    if ld > 0: lucro_diario_txt = f"+{formatar_prata(ld)}/un"
+            
             for e in range(0, 5):
                 sufix = f"_LEVEL{e}@{e}" if e > 0 else ""
-                id_b = f"T{t}_{config['bruto']}{sufix}"
-                id_r = f"T{t}_{config['refinado']}{sufix}"
-                
-                # Regra de Craft: T5 precisa de Refinado T4 flat (.0). T4 precisa do T3.
+                id_b, id_r = f"T{t}_{config['bruto']}{sufix}", f"T{t}_{config['refinado']}{sufix}"
                 id_r_anterior = config['base_t3'] if t == 4 else f"T{t-1}_{config['refinado']}"
                 
-                if id_b in precos and id_r in precos and id_r_anterior in precos:
+                if all(i in precos for i in [id_b, id_r, id_r_anterior]):
                     cid_compra_b = min(precos[id_b], key=precos[id_b].get)
                     preco_b = precos[id_b][cid_compra_b]
                     
@@ -369,79 +401,72 @@ with abas[0]:
                     cid_venda = max(precos[id_r], key=precos[id_r].get)
                     preco_r = precos[id_r][cid_venda]
                     
-                    # MATEMÁTICA REAL DE PRODUÇÃO
-                    qtd_bruto = REGRAS_QTD_BRUTO[t]
-                    custo_material = (preco_b * qtd_bruto) + preco_ant
-                    
-                    # Cálculo de Taxa Oculta (Item Value * 0.1125 * (TaxFee/100))
+                    custo_material = (preco_b * REGRAS_QTD_BRUTO[t]) + preco_ant
                     iv = ITEM_VALUE_BASE[t] * (2 ** e) if e > 0 else ITEM_VALUE_BASE[t]
-                    custo_estacao = iv * 0.1125 * (taxa_uso / 100) 
+                    custo_estacao = iv * 0.1125 * (taxa_estacao / 100) 
                     
                     custo_total = custo_material + custo_estacao
-                    
-                    receita_com_rrr = preco_r / (1 - (rrr/100))
-                    lucro = (receita_com_rrr * (1 - TAXA_MERCADO)) - custo_total
-                    
-                    vol = vendas_24h.get(id_r, 0)
+                    lucro = ( (preco_r / (1 - (rrr/100))) * (1 - taxa_mercado_atual) ) - custo_total
                     
                     refino_data.append({
-                        "Receita": f"T{t}.{e}",
-                        "Logística": f"{cid_compra_b} ➔ {cid_venda}",
-                        "Matéria Prima": formatar_prata(custo_material),
-                        "Custo Produção": formatar_prata(custo_total),
-                        "Venda Final": formatar_prata(preco_r),
-                        "Lucro Real / Un": formatar_prata(lucro),
-                        "✨ Lucro Real / Un": lucro, 
-                        "Margem %": round((lucro/custo_total)*100, 1) if custo_total > 0 else 0,
-                        "Giro 24h": vol,
+                        "Receita": f"T{t}.{e}", "Logística": f"{cid_compra_b} ➔ {cid_venda}",
+                        "Matéria Prima 🥈": formatar_prata(custo_material), "Custo Produção 🥈": formatar_prata(custo_total),
+                        "Venda Final 🥈": formatar_prata(preco_r), "Lucro Real / Un 🥈": formatar_prata(lucro),
+                        "📖 Intel Diário": lucro_diario_txt,
+                        "✨ Lucro Un.": lucro, "Margem %": round((lucro/custo_total)*100, 1) if custo_total > 0 else 0,
+                        "Giro 24h": vendas_24h.get(id_r, 0),
                         "Status": "💎 PRO ROTA" if lucro > (custo_total * 0.3) else "✅ OK" if lucro > 0 else "❌ LOSS"
                     })
 
         if refino_data:
-            df_refino = pd.DataFrame(refino_data).sort_values("✨ Lucro Real / Un", ascending=False)
-            
-            st.dataframe(
-                df_refino.drop(columns=['✨ Lucro Real / Un']), 
-                use_container_width=True, 
-                hide_index=True
-            )
-            
-            c1, c2 = st.columns(2)
-            c1.success(f"📍 **Dica:** Refinar em **{config['bonus']}** maximiza o retorno (Bônus de Cidade). A tabela já assume a melhor rota de compra.")
-            c2.info("📊 **Matemática PRO:** O *Custo de Produção* agora calcula o Refinado da Tier anterior exato + Taxa Baseada em Item Value!")
-        else:
-            st.warning("Dados insuficientes para calcular o refino no momento. O mercado pode estar sem ofertas para estes itens.")
+            df_refino = pd.DataFrame(refino_data).sort_values("✨ Lucro Un.", ascending=False)
+            st.dataframe(df_refino.drop(columns=['✨ Lucro Un.']), use_container_width=True, hide_index=True)
+            st.success(f"📍 Bônus de Produção para {recurso_nome}: **{config['bonus']}**.")
+        else: st.warning("Dados indisponíveis na API do Albion no momento.")
 
-# --- ABA 2: RADAR GLOBAL (TRANSPORTE) ---
-with abas[1]:
-    if st.button("🚀 INICIAR VARREDURA TÁTICA GLOBAL", use_container_width=True, type="primary"):
-        if not origens: st.error("❌ Escolha pelo menos uma origem na barra lateral.")
-        else:
-            df_global = motor_de_busca_transporte(TODOS_ITENS, servidor_api, origens, CIDADES_ROYAL, cap_selecionada)
-            renderizar_ultimate_dashboard(df_global)
-
-# --- ABAS 3 EM DIANTE: CATEGORIAS CLÁSSICAS ---
-for i, nome in enumerate(CATEGORIAS):
-    with abas[i+2]: 
-        if st.button(f"🚀 VARRER {nome.upper()}", key=f"btn_{i}", use_container_width=True, type="primary"):
-            if not origens: st.error("❌ Escolha pelo menos uma origem na barra lateral.")
-            else:
-                df_cat = motor_de_busca_transporte(CATEGORIAS[nome], servidor_api, origens, [destino], cap_selecionada)
-                renderizar_ultimate_dashboard(df_cat)
-
-# ==========================================
-# 7. MANUAL DO HEDGE FUND
-# ==========================================
-st.divider()
-with st.expander("📖 Manual de Instruções (Segredos do God Mode & Rei do Refino)"):
-    st.markdown("""
-    **1. 👑 REI DO REFINO (Logística Industrial Avançada):**
-    * **Receita Exata do Jogo:** O custo da matéria-prima agora soma os Brutos (ex: 3x T5) + 1 Refinado da tier anterior (ex: 1x T4 Bar).
-    * **Taxa Item Value:** O *Custo de Produção* calcula exatamente o que a loja cobra, usando o peso oculto (*Item Value*) que a Sandbox Interactive usa no servidor.
-    * **Formatação Monetária:** Valores formatados com *K (Mil)* e *M (Milhão)* acompanhados do selo 🥈 para evitar confusões visuais.
+# ------------------------------------------
+# MÓDULO 2: BLACK MARKET SNIPER
+# ------------------------------------------
+elif selecao_app == "🎯 Black Market Sniper":
+    st.markdown(f"<h2>{selecao_app}</h2>", unsafe_allow_html=True)
+    st.info("⚠️ O Sniper verifica lucros rápidos entregando no Black Market (Caerleon).")
     
-    **2. 🚚 RADAR DE TRANSPORTE (Arbitragem Pura):**
-    * **⚖️ Lucro por Kg:** Melhor métrica para quem anda de Boi ou a pé. Evita viagens lentas e pesadas para pouco lucro.
-    * **📈 Gráfico 24h:** A linha sobe? O preço está encarecendo. A linha cai? Fuja, o mercado está inundado.
-    * **🚨 SCAM:** Se marcado com SCAM, alguém monopolizou o item e listou por um valor irreal para inflar preços. **NÃO COMPRE**.
-    """)
+    is_fast_flip = st.toggle("🔥 Modo Fast Flip (Apenas Caerleon -> Mercado Negro)", value=False, help="Ignora cidades Royal e foca em comprar em Caerleon e andar 2 minutos até o BM.")
+    
+    c1, c2 = st.columns([2, 1])
+    with c1: 
+        if is_fast_flip:
+            origens = ["Caerleon"]
+            st.success("📍 Modo Fast Flip Ativado: Buscando itens nas lojas de Caerleon para venda imediata no Black Market.")
+        else:
+            origens = st.multiselect("Buscando Oportunidades nas Cidades:", CIDADES_ROYAL, default=["Martlock", "Thetford", "Fort Sterling", "Lymhurst", "Bridgewatch", "Brecilien"])
+            
+    with c2: btn_sniper = st.button(f"🎯 ATIRAR SNIPER", use_container_width=True)
+    
+    f_tier, f_enc, o_scam, f_nome, m_min, v_min = rendering_top_tatico_filters()
+
+    if btn_sniper:
+        if not origens: st.error("❌ Selecione ao menos uma cidade Royal.")
+        else:
+            itens_bm = CATEGORIAS["⚔️ Armas Meta"] + CATEGORIAS["⛏️ Roupas Coleta"]
+            df_sniper = motor_de_busca_transporte(itens_bm, servidor_api, origens, ["Black Market"], cap_selecionada, taxa_mercado_atual)
+            renderizar_tabela_transporte(df_sniper, f_tier, f_enc, o_scam, f_nome, max(15, m_min) if not is_fast_flip else m_min, max(1, v_min))
+
+# ------------------------------------------
+# MÓDULO 3: RADAR GLOBAL 
+# ------------------------------------------
+elif selecao_app == "🌍 Radar Tático Global":
+    st.markdown(f"<h2>{selecao_app}</h2>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.5, 1.5, 1.2])
+    with c1: origens = st.multiselect("Comprar em:", CIDADES_ROYAL, default=["Martlock"], label_visibility="collapsed")
+    with c2: destino = st.selectbox("Vender em:", CIDADES_DESTINO, index=1, label_visibility="collapsed")
+    with c3: btn_transporte = st.button(f"🚀 VARRER AGORA", use_container_width=True)
+
+    f_tier, f_enc, o_scam, f_nome, m_min, v_min = rendering_top_tatico_filters()
+
+    if btn_transporte:
+        if not origens: st.error("❌ Selecione uma cidade de origem.")
+        else:
+            df_transporte = motor_de_busca_transporte(TODOS_ITENS, servidor_api, origens, [destino], cap_selecionada, taxa_mercado_atual)
+            renderizar_tabela_transporte(df_transporte, f_tier, f_enc, o_scam, f_nome, m_min, v_min)
