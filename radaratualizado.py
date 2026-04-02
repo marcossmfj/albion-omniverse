@@ -44,13 +44,16 @@ CIDADES_ROYAL = ["Martlock", "Caerleon", "Thetford", "Fort Sterling", "Lymhurst"
 CIDADES_DESTINO = CIDADES_ROYAL + ["Black Market"]
 MAPA_SERVIDORES = { "Américas (West)": "west", "Europa (Europe)": "europe", "Ásia (East)": "east" }
 
-# Configuração Industrial do Rei do Refino
+# Dicionários de Regras Reais de Refino (Albion Online Oficial)
+REGRAS_QTD_BRUTO = {4: 2, 5: 3, 6: 4, 7: 5, 8: 5}
+ITEM_VALUE_BASE = {4: 16, 5: 32, 6: 64, 7: 128, 8: 256}
+
 MAPA_REFINO = {
-    "Minério (Metal)": {"bruto": "ORE", "refinado": "METALBAR", "bonus": "Thetford"},
-    "Madeira (Tábua)": {"bruto": "WOOD", "refinado": "PLANKS", "bonus": "Fort Sterling"},
-    "Pelego (Couro)": {"bruto": "HIDE", "refinado": "LEATHER", "bonus": "Martlock"},
-    "Fibra (Tecido)": {"bruto": "FIBER", "refinado": "CLOTH", "bonus": "Lymhurst"},
-    "Pedra (Bloco)": {"bruto": "ROCK", "refinado": "STONEBLOCK", "bonus": "Bridgewatch"}
+    "Minério (Metal)": {"bruto": "ORE", "refinado": "METALBAR", "base_t3": "T3_METALBAR", "bonus": "Thetford"},
+    "Madeira (Tábua)": {"bruto": "WOOD", "refinado": "PLANKS", "base_t3": "T3_PLANKS", "bonus": "Fort Sterling"},
+    "Pelego (Couro)": {"bruto": "HIDE", "refinado": "LEATHER", "base_t3": "T3_LEATHER", "bonus": "Martlock"},
+    "Fibra (Tecido)": {"bruto": "FIBER", "refinado": "CLOTH", "base_t3": "T3_CLOTH", "bonus": "Lymhurst"},
+    "Pedra (Bloco)": {"bruto": "ROCK", "refinado": "STONEBLOCK", "base_t3": "T3_STONEBLOCK", "bonus": "Bridgewatch"}
 }
 
 # ==========================================
@@ -59,9 +62,9 @@ MAPA_REFINO = {
 def formatar_prata(valor):
     try:
         valor = float(valor)
-        if valor >= 1_000_000: return f"{valor/1_000_000:.2f}M"
-        if valor >= 1_000: return f"{valor/1000:.0f}K"
-        return str(int(valor))
+        if valor >= 1_000_000: return f"{valor/1_000_000:.2f}M 🥈"
+        if valor >= 1_000: return f"{valor/1000:.1f}K 🥈"
+        return f"{int(valor)} 🥈"
     except: return str(valor)
 
 def calcular_peso_item(item_id):
@@ -95,17 +98,22 @@ DICIONARIO_PTBR = {
 def formatar_nome_item(item_id):
     tier = item_id.split("_")[0] if "_" in item_id else "T?"
     enc = item_id.split("@")[1] if "@" in item_id else "0"
-    item_base = item_id.split("@")[0].replace(f"{tier}_", "", 1)
+    item_base = item_id.split("@")[0].replace(f"{tier}_", "", 1).split("_LEVEL")[0]
     nome_pt = DICIONARIO_PTBR.get(item_base, item_base.replace("_", " "))
     return f"{nome_pt} {tier}.{enc}", tier, enc
 
 def gerar_matriz(lista, min_t=4, max_t=8, max_e=4):
     res = []
+    recursos = ["WOOD", "ROCK", "ORE", "HIDE", "FIBER", "CLOTH", "METALBAR", "PLANKS", "LEATHER", "STONEBLOCK"]
     for item in lista:
         for t in range(min_t, max_t + 1):
             base = f"T{t}_{item}"
             res.append(base)
-            for e in range(1, max_e + 1): res.append(f"{base}@{e}")
+            for e in range(1, max_e + 1):
+                if item in recursos:
+                    res.append(f"{base}_LEVEL{e}@{e}")
+                else:
+                    res.append(f"{base}@{e}")
     return res
 
 CATEGORIAS = {
@@ -305,40 +313,32 @@ if st.sidebar.button("🔄 Resetar Cache", use_container_width=True):
 st.title("💎 Terminal Omniverse GOD MODE")
 st.caption("A plataforma definitiva para Arbitragem de Transporte e Refino Industrial no Albion.")
 
-# Criação das Abas (Transporte Global, Rei do Refino e depois as categorias específicas)
-abas = st.tabs(["🌍 Radar Tático Global", "👑 REI DO REFINO"] + list(CATEGORIAS.keys()))
+abas = st.tabs(["👑 REI DO REFINO (NOVO)", "🌍 Radar Tático Global"] + list(CATEGORIAS.keys()))
 
-# --- ABA 1: RADAR GLOBAL (TRANSPORTE) ---
+# --- ABA 1: REI DO REFINO (MÓDULO INDUSTRIAL PRO) ---
 with abas[0]:
-    if st.button("🚀 INICIAR VARREDURA TÁTICA GLOBAL", use_container_width=True, type="primary"):
-        if not origens: st.error("❌ Escolha pelo menos uma origem na barra lateral.")
-        else:
-            df_global = motor_de_busca_transporte(TODOS_ITENS, servidor_api, origens, CIDADES_ROYAL, cap_selecionada)
-            renderizar_ultimate_dashboard(df_global)
-
-# --- ABA 2: REI DO REFINO (MÓDULO INDUSTRIAL) ---
-with abas[1]:
-    st.markdown("### 🏭 O Rei do Refino: Inteligência Industrial")
+    st.markdown("### 🏭 O Rei do Refino: Inteligência Industrial Avançada")
     
     col_a, col_b, col_c = st.columns(3)
     with col_a:
         recurso = st.selectbox("O que vamos refinar hoje?", list(MAPA_REFINO.keys()))
         config = MAPA_REFINO[recurso]
     with col_b:
-        taxa_uso = st.number_input("Taxa da Estação (ex: 500)", value=500, help="Veja no mapa do jogo o valor cobrado pela loja.")
+        taxa_uso = st.number_input("Taxa da Estação / Tax Fee (ex: 500)", value=500, help="Valor cobrado por 100 de nutrição na cidade.")
     with col_c:
         uso_foco = st.toggle("✨ Usar Foco de Produção", value=True)
         rrr = 43.5 if uso_foco else 15.2
         st.info(f"Taxa de Retorno (RRR): **{rrr}%**")
 
-    if st.button(f"🚀 CALCULAR MELHOR ROTA DE REFINO: {recurso.upper()}", use_container_width=True, type="primary"):
-        lista_ids = []
+    if st.button(f"🚀 PROCESSAR ROTA INDUSTRIAL: {recurso.upper()}", use_container_width=True, type="primary"):
+        lista_ids = [config['base_t3']] # Precisa do T3 flat para fazer T4
         for t in range(4, 9):
             lista_ids.append(f"T{t}_{config['bruto']}")
-            lista_ids.append(f"T{t}_{config['refinado']}")
+            lista_ids.append(f"T{t}_{config['refinado']}") 
             for e in range(1, 5):
-                lista_ids.append(f"T{t}_{config['bruto']}@{e}")
-                lista_ids.append(f"T{t}_{config['refinado']}@{e}")
+                sufix = f"_LEVEL{e}@{e}"
+                lista_ids.append(f"T{t}_{config['bruto']}{sufix}")
+                lista_ids.append(f"T{t}_{config['refinado']}{sufix}")
 
         precos_raw, hist_raw = motor_de_busca_refino(lista_ids, servidor_api, CIDADES_ROYAL)
         
@@ -352,19 +352,31 @@ with abas[1]:
         refino_data = []
         for t in range(4, 9):
             for e in range(0, 5):
-                sufix = f"@{e}" if e > 0 else ""
+                sufix = f"_LEVEL{e}@{e}" if e > 0 else ""
                 id_b = f"T{t}_{config['bruto']}{sufix}"
                 id_r = f"T{t}_{config['refinado']}{sufix}"
                 
-                if id_b in precos and id_r in precos:
-                    cid_compra = min(precos[id_b], key=precos[id_b].get)
-                    preco_b = precos[id_b][cid_compra]
+                # Regra de Craft: T5 precisa de Refinado T4 flat (.0). T4 precisa do T3.
+                id_r_anterior = config['base_t3'] if t == 4 else f"T{t-1}_{config['refinado']}"
+                
+                if id_b in precos and id_r in precos and id_r_anterior in precos:
+                    cid_compra_b = min(precos[id_b], key=precos[id_b].get)
+                    preco_b = precos[id_b][cid_compra_b]
+                    
+                    cid_compra_ant = min(precos[id_r_anterior], key=precos[id_r_anterior].get)
+                    preco_ant = precos[id_r_anterior][cid_compra_ant]
                     
                     cid_venda = max(precos[id_r], key=precos[id_r].get)
                     preco_r = precos[id_r][cid_venda]
                     
-                    custo_material = preco_b * 2
-                    custo_estacao = (preco_b * 0.05) * (taxa_uso / 100) 
+                    # MATEMÁTICA REAL DE PRODUÇÃO
+                    qtd_bruto = REGRAS_QTD_BRUTO[t]
+                    custo_material = (preco_b * qtd_bruto) + preco_ant
+                    
+                    # Cálculo de Taxa Oculta (Item Value * 0.1125 * (TaxFee/100))
+                    iv = ITEM_VALUE_BASE[t] * (2 ** e) if e > 0 else ITEM_VALUE_BASE[t]
+                    custo_estacao = iv * 0.1125 * (taxa_uso / 100) 
+                    
                     custo_total = custo_material + custo_estacao
                     
                     receita_com_rrr = preco_r / (1 - (rrr/100))
@@ -373,26 +385,40 @@ with abas[1]:
                     vol = vendas_24h.get(id_r, 0)
                     
                     refino_data.append({
-                        "Tier": f"T{t}.{e}",
-                        "Logística Industrial": f"{cid_compra} ➔ {cid_venda}",
-                        "Compra Bruto": formatar_prata(preco_b),
-                        "Custo Produção": formatar_prata(custo_total), # <--- COLUNA NOVA AQUI!
-                        "Venda Refinado": formatar_prata(preco_r),
+                        "Receita": f"T{t}.{e}",
+                        "Logística": f"{cid_compra_b} ➔ {cid_venda}",
+                        "Matéria Prima": formatar_prata(custo_material),
+                        "Custo Produção": formatar_prata(custo_total),
+                        "Venda Final": formatar_prata(preco_r),
                         "Lucro Real / Un": formatar_prata(lucro),
+                        "✨ Lucro Real / Un": lucro, 
                         "Margem %": round((lucro/custo_total)*100, 1) if custo_total > 0 else 0,
                         "Giro 24h": vol,
-                        "Status": "💎 ALTO LUCRO" if lucro > (preco_b * 0.5) else "✅ OK" if lucro > 0 else "❌ PREJUÍZO"
+                        "Status": "💎 PRO ROTA" if lucro > (custo_total * 0.3) else "✅ OK" if lucro > 0 else "❌ LOSS"
                     })
 
         if refino_data:
-            df_refino = pd.DataFrame(refino_data).sort_values("Margem %", ascending=False)
-            st.dataframe(df_refino, use_container_width=True, hide_index=True)
+            df_refino = pd.DataFrame(refino_data).sort_values("✨ Lucro Real / Un", ascending=False)
+            
+            st.dataframe(
+                df_refino.drop(columns=['✨ Lucro Real / Un']), 
+                use_container_width=True, 
+                hide_index=True
+            )
             
             c1, c2 = st.columns(2)
-            c1.success(f"📍 **Dica:** Refinar em **{config['bonus']}** maximiza o retorno (Bônus de Cidade).")
-            c2.warning("⚠️ **Atenção:** Vendas em Caerleon oferecem lucros altíssimos, mas considere o risco da Red Zone.")
+            c1.success(f"📍 **Dica:** Refinar em **{config['bonus']}** maximiza o retorno (Bônus de Cidade). A tabela já assume a melhor rota de compra.")
+            c2.info("📊 **Matemática PRO:** O *Custo de Produção* agora calcula o Refinado da Tier anterior exato + Taxa Baseada em Item Value!")
         else:
             st.warning("Dados insuficientes para calcular o refino no momento. O mercado pode estar sem ofertas para estes itens.")
+
+# --- ABA 2: RADAR GLOBAL (TRANSPORTE) ---
+with abas[1]:
+    if st.button("🚀 INICIAR VARREDURA TÁTICA GLOBAL", use_container_width=True, type="primary"):
+        if not origens: st.error("❌ Escolha pelo menos uma origem na barra lateral.")
+        else:
+            df_global = motor_de_busca_transporte(TODOS_ITENS, servidor_api, origens, CIDADES_ROYAL, cap_selecionada)
+            renderizar_ultimate_dashboard(df_global)
 
 # --- ABAS 3 EM DIANTE: CATEGORIAS CLÁSSICAS ---
 for i, nome in enumerate(CATEGORIAS):
@@ -409,14 +435,13 @@ for i, nome in enumerate(CATEGORIAS):
 st.divider()
 with st.expander("📖 Manual de Instruções (Segredos do God Mode & Rei do Refino)"):
     st.markdown("""
-    **1. 🚚 RADAR DE TRANSPORTE (Arbitragem Pura):**
+    **1. 👑 REI DO REFINO (Logística Industrial Avançada):**
+    * **Receita Exata do Jogo:** O custo da matéria-prima agora soma os Brutos (ex: 3x T5) + 1 Refinado da tier anterior (ex: 1x T4 Bar).
+    * **Taxa Item Value:** O *Custo de Produção* calcula exatamente o que a loja cobra, usando o peso oculto (*Item Value*) que a Sandbox Interactive usa no servidor.
+    * **Formatação Monetária:** Valores formatados com *K (Mil)* e *M (Milhão)* acompanhados do selo 🥈 para evitar confusões visuais.
+    
+    **2. 🚚 RADAR DE TRANSPORTE (Arbitragem Pura):**
     * **⚖️ Lucro por Kg:** Melhor métrica para quem anda de Boi ou a pé. Evita viagens lentas e pesadas para pouco lucro.
     * **📈 Gráfico 24h:** A linha sobe? O preço está encarecendo. A linha cai? Fuja, o mercado está inundado.
     * **🚨 SCAM:** Se marcado com SCAM, alguém monopolizou o item e listou por um valor irreal para inflar preços. **NÃO COMPRE**.
-    * **🦣 Carga Total:** Escolha a montaria na barra lateral para ver exatamente quantos milhões você faz lotando o inventário.
-    
-    **2. 👑 REI DO REFINO (Logística Industrial):**
-    * **O que ele faz?** Ele acha a cidade com a matéria-prima mais barata e te diz onde vender o item refinado mais caro.
-    * **Custos Ocultos:** A coluna **Custo Produção** já soma a compra dos 2 brutos + a taxa da loja que você digitou lá em cima.
-    * **Lucro Real:** O lucro gerado na tabela abate o custo de produção e contabiliza a prata "invisível" que o RRR devolve pra sua bolsa!
     """)
